@@ -103,7 +103,7 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
 
     let iunknown_impl = quote! {
         impl #struct_name {
-            fn query_interface(&mut self, riid: &winapi::shared::guiddef::GUID, obj: &mut usize) -> winapi::um::winnt::HRESULT {
+            extern "system" fn query_interface(&mut self, riid: &winapi::shared::guiddef::GUID, obj: &mut usize) -> winapi::um::winnt::HRESULT {
                 use winapi::Interface;
                 use winapi::shared::winerror::{S_OK, E_NOTIMPL};
 
@@ -120,12 +120,12 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
                 return E_NOTIMPL;
             }
 
-            fn add_ref(&mut self) -> u32 {
+            extern "system" fn add_ref(&mut self) -> u32 {
                 let prev = self.__refs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 prev + 1
             }
 
-            fn release(&mut self) -> u32 {
+            extern "system" fn release(&mut self) -> u32 {
                 let prev = self.__refs.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 if prev == 1 {
                     let _box = unsafe { Box::from_raw(self as *mut _) };
