@@ -1,0 +1,24 @@
+cargo-features = ["edition"]
+
+[package]
+name = "com-impl"
+version = "0.1.0"
+authors = ["Gabriel Majeri <gabriel.majeri6@gmail.com>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "0.14", features = ["full"] }
+quote = { version = "0.6", default-features = false }
+proc-macro2 = { version = "0.4", features = ["nightly"] }
+heck = "0.3"
+
+[dev-dependencies.winapi]
+version = "0.3"
+features = [
+    "winerror",
+    "unknwnbase",
+    "dxgi",
+]
