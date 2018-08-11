@@ -40,7 +40,7 @@ fn make_vtable_creator_ident(ident: &syn::Ident) -> syn::Ident {
 }
 
 #[proc_macro_attribute]
-pub fn com_interface(attr: TokenStream, input: TokenStream) -> TokenStream {
+pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
     let Args { parents } =
         syn::parse(attr).expect("You must specify at least one interface to implement");
 
@@ -158,7 +158,7 @@ pub fn com_interface(attr: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn com_implementation(attr: TokenStream, input: TokenStream) -> TokenStream {
+pub fn implementation(attr: TokenStream, input: TokenStream) -> TokenStream {
     let Args { parents } =
         syn::parse(attr).expect("Failed to parse parent interface and implemented interface");
 

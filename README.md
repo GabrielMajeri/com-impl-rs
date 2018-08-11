@@ -44,25 +44,25 @@ use some::other::{Interface, InterfaceVtbl};
 Then you can import the procedural macros exported by this crate.
 
 ```rust
-use com_impl::{com_interface, com_implementation};
+use com_impl::{interface, implementation};
 ```
 
 Define your structure.
 You must specify, in the correct order, all of the interfaces in the inheritance chain.
 
 ```rust
-#[com_interface(IUnknown, IDXGIObject, IDXGIFactory)]
+#[interface(IUnknown, IDXGIObject, IDXGIFactory)]
 struct MyInterface {}
 ```
 
-For each interface in the inheritance chain, you must have a new `com_implementation`.
+For each interface in the inheritance chain, you must have a new `implementation`.
 
 ```rust
 // IUnknown's methods & reference counting are implemented automatically.
 
 // First parameter is the base class, in this case `IUnknown`.
 // Second parameter is the class you are implementing, in this case `IDXGIObject`.
-#[com_implementation(IUnknown, IDXGIObject)]
+#[implementation(IUnknown, IDXGIObject)]
 impl MyInterface {
     // COM functions follow the PascalCase calling convention.
     // You implement a PascalCase function by using the snake_case name.
@@ -79,7 +79,7 @@ If we had specified `NextInterface` instead of `IDXGIObject` when defining the s
 
 ```rust
 /// `IDXGIObject` implemented above is the parent, `NextInterface` is implemented here.
-#[com_implementation(IDXGIObject, NextInterface)]
+#[implementation(IDXGIObject, NextInterface)]
 impl MyInterface {
     // ... New functions added by NextInterface ...
 }

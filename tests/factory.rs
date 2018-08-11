@@ -7,9 +7,9 @@
 use winapi::shared::dxgi::{IDXGIFactory, IDXGIFactoryVtbl, IDXGIObject, IDXGIObjectVtbl};
 use winapi::um::unknwnbase::{IUnknown, IUnknownVtbl};
 
-use com_impl::{com_implementation, com_interface};
+use com_impl::{implementation, interface};
 
-#[com_interface(IUnknown, IDXGIObject, IDXGIFactory)]
+#[interface(IUnknown, IDXGIObject, IDXGIFactory)]
 pub struct FakeFactory {
     variable: u64,
 }
@@ -28,7 +28,7 @@ impl FakeFactory {
     }
 }
 
-#[com_implementation(IUnknown, IDXGIObject)]
+#[implementation(IUnknown, IDXGIObject)]
 impl FakeFactory {
     fn set_private_data() {}
     fn set_private_data_interface() {}
@@ -36,7 +36,7 @@ impl FakeFactory {
     fn get_parent() {}
 }
 
-#[com_implementation(IDXGIObject, IDXGIFactory)]
+#[implementation(IDXGIObject, IDXGIFactory)]
 impl FakeFactory {
     fn create_software_adapter() {}
 
