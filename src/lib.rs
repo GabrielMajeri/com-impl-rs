@@ -83,9 +83,9 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
                 fn _create_IUnknownVtbl() -> IUnknownVtbl {
                     unsafe {
                         IUnknownVtbl {
-                            QueryInterface: std::mem::transmute(&Self::query_interface),
-                            AddRef: std::mem::transmute(&Self::add_ref),
-                            Release: std::mem::transmute(&Self::release),
+                            QueryInterface: std::mem::transmute(Self::query_interface as usize),
+                            AddRef: std::mem::transmute(Self::add_ref as usize),
+                            Release: std::mem::transmute(Self::release as usize),
                         }
                     }
                 }
@@ -205,7 +205,7 @@ pub fn implementation(attr: TokenStream, input: TokenStream) -> TokenStream {
                     unsafe {
                         #vtable {
                             parent: Self::#parent_creator(),
-                            #(#method_names: std::mem::transmute(&Self::#fns),)*
+                            #(#method_names: std::mem::transmute((Self::#fns) as usize),)*
                         }
                     }
                 }
