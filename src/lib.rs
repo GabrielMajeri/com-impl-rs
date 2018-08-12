@@ -12,7 +12,8 @@ use proc_macro::TokenStream;
 
 use syn::punctuated::Punctuated;
 use syn::synom::Synom;
-use syn::Ident;
+use syn::fold::Fold;
+use syn::{Ident, ItemStruct, Fields, FieldsNamed, MethodSig};
 
 struct Args {
     parents: Vec<Ident>,
@@ -27,6 +28,42 @@ impl Synom for Args {
     ));
 }
 
+struct IUnknownImpl {
+    // The identifier of the last-level VTable.
+    vtable: Ident,
+}
+
+impl Fold for IUnknownImpl {
+    fn fold_item_struct(&mut self, mut st: ItemStruct) -> ItemStruct {
+        // Ensure the layout of the struct is fixed.
+        st.attrs.push(parse_quote!(#[repr(C)]));
+
+        st.fields = self.fold_fields(st.fields);
+
+        st
+    }
+
+    fn fold_fields(&mut self, f: Fields) -> Fields {
+        match f {
+            Fields::Named(named) => Fields::Named(self.fold_fields_named(named)),
+            Fields::Unnamed(_) => panic!("Only structs with named fields are supported"),
+            Fields::Unit => panic!("Unit structs not supported, please append `{ }` to the struct definition"),
+        }
+    }
+
+    fn fold_fields_named(&mut self, f: FieldsNamed) -> FieldsNamed {
+        let vtable = &self.vtable;
+        let named = f.named;
+        parse_quote! {
+            {
+                __vtable: Box<#vtable>,
+                __refs: std::sync::atomic::AtomicU32,
+                #named
+            }
+        }
+    }
+}
+
 fn make_vtable_ident(ident: &syn::Ident) -> syn::Ident {
     let name = format!("{}Vtbl", ident);
 
@@ -34,7 +71,7 @@ fn make_vtable_ident(ident: &syn::Ident) -> syn::Ident {
 }
 
 fn make_vtable_creator_ident(ident: &syn::Ident) -> syn::Ident {
-    let name = format!("_create_{}", ident);
+    let name = format!("__create_{}", ident);
 
     syn::Ident::new(&name, ident.span())
 }
@@ -53,56 +90,36 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
     let vtable = make_vtable_ident(&last);
 
     // Return the original input if it fails to parse.
-    let mut input: syn::ItemStruct = match syn::parse(input.clone()) {
+    let input: syn::ItemStruct = match syn::parse(input.clone()) {
         Ok(input) => input,
         Err(_) => return input,
     };
 
-    // Ensure the layout of the struct is fixed.
-    let repr_c = parse_quote!(#[repr(C)]);
-    input.attrs.push(repr_c);
-
-    if let syn::Fields::Named(fnamed) = &mut input.fields {
-        let fields = &fnamed.named;
-        *fnamed = parse_quote! {
-            {
-                __vtable: Box<#vtable>,
-                __refs: std::sync::atomic::AtomicU32,
-                #fields
-            }
-        };
-    } else {
-        panic!("Only structs with named fields are supported");
-    }
+    let mut iunknown = IUnknownImpl { vtable: vtable.clone() };
+    let input = iunknown.fold_item_struct(input);
 
     let struct_name = input.ident.clone();
 
-    let iunknown_vtable_creator = {
-        quote! {
-            impl #struct_name {
-                fn _create_IUnknownVtbl() -> IUnknownVtbl {
-                    unsafe {
-                        IUnknownVtbl {
-                            QueryInterface: std::mem::transmute(Self::query_interface as usize),
-                            AddRef: std::mem::transmute(Self::add_ref as usize),
-                            Release: std::mem::transmute(Self::release as usize),
-                        }
-                    }
-                }
+    let vtable_creator: syn::ItemFn = {
+        // Identifier of the function which generate the final vtable.
+        let last_vtable_creator = make_vtable_creator_ident(&vtable);
+
+        parse_quote! {
+            fn create_vtable() -> Box<#vtable> {
+                Box::new(Self::#last_vtable_creator())
             }
         }
     };
 
-    let refs_impl = quote! {
+
+    let expanded = quote! {
+        #input
+
         impl #struct_name {
             fn create_refs() -> std::sync::atomic::AtomicU32 {
                 std::sync::atomic::AtomicU32::new(1)
             }
-        }
-    };
 
-    let iunknown_impl = quote! {
-        impl #struct_name {
             extern "system" fn query_interface(&mut self, riid: &winapi::shared::guiddef::GUID, obj: &mut usize) -> winapi::um::winnt::HRESULT {
                 use winapi::Interface;
                 use winapi::shared::winerror::{S_OK, E_NOTIMPL};
@@ -132,33 +149,23 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
                 }
                 prev - 1
             }
-        }
-    };
 
-    let vtable_creator = {
-        let last_vtable_creator = make_vtable_creator_ident(&vtable);
-        quote! {
-            impl #struct_name {
-                fn create_vtable() -> Box<#vtable> {
-                    Box::new(Self::#last_vtable_creator())
+            fn __create_IUnknownVtbl() -> IUnknownVtbl {
+                unsafe {
+                    IUnknownVtbl {
+                        QueryInterface: std::mem::transmute(Self::query_interface as usize),
+                        AddRef: std::mem::transmute(Self::add_ref as usize),
+                        Release: std::mem::transmute(Self::release as usize),
+                    }
                 }
             }
-        }
-    };
 
-    let expanded = quote! {
-        #input
-        #refs_impl
-        #iunknown_impl
-        #iunknown_vtable_creator
-        #vtable_creator
+            #vtable_creator
+        }
     };
 
     expanded.into()
 }
-
-use syn::fold::Fold;
-use syn::MethodSig;
 
 struct SystemAbi;
 impl Fold for SystemAbi {
