@@ -157,6 +157,18 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
     expanded.into()
 }
 
+use syn::fold::Fold;
+use syn::MethodSig;
+
+struct SystemAbi;
+impl Fold for SystemAbi {
+    fn fold_method_sig(&mut self, mut f: MethodSig) -> MethodSig {
+        f.abi = Some(parse_quote!(extern "system"));
+
+        f
+    }
+}
+
 #[proc_macro_attribute]
 pub fn implementation(attr: TokenStream, input: TokenStream) -> TokenStream {
     let Args { parents } =
@@ -165,7 +177,9 @@ pub fn implementation(attr: TokenStream, input: TokenStream) -> TokenStream {
     let parent = &parents[0];
     let iface = &parents[1];
 
-    let mut input: syn::ItemImpl = syn::parse(input).expect("Could not parse interface impl block");
+    let input: syn::ItemImpl = syn::parse(input).expect("Could not parse interface impl block");
+
+    let input = SystemAbi.fold_item_impl(input);
 
     let struct_name: syn::Ident = {
         let self_ty = input.self_ty.clone();
@@ -174,15 +188,9 @@ pub fn implementation(attr: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let vtable_creator = {
-        let fns: Vec<_> = input
-            .items
-            .iter_mut()
+        let fns: Vec<_> = input.items.iter()
             .filter_map(|it| match it {
-                syn::ImplItem::Method(method) => {
-                    method.sig.abi = Some(parse_quote!(extern "system"));
-
-                    Some(&method.sig.ident)
-                }
+                syn::ImplItem::Method(method) => Some(&method.sig.ident),
                 _ => None,
             }).collect();
 
