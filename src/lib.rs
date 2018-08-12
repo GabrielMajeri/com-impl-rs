@@ -13,68 +13,7 @@ use proc_macro::TokenStream;
 use syn::punctuated::Punctuated;
 use syn::synom::Synom;
 use syn::fold::Fold;
-use syn::{Ident, ItemStruct, Fields, FieldsNamed, MethodSig};
-
-struct Args {
-    parents: Vec<Ident>,
-}
-
-impl Synom for Args {
-    named!(parse -> Self, map!(
-        call!(Punctuated::<Ident, Token![,]>::parse_terminated_nonempty),
-        |parents| Args {
-            parents: parents.into_iter().collect(),
-        }
-    ));
-}
-
-struct IUnknownImpl {
-    // The identifier of the last-level VTable.
-    vtable: Ident,
-}
-
-impl Fold for IUnknownImpl {
-    fn fold_item_struct(&mut self, mut st: ItemStruct) -> ItemStruct {
-        // Ensure the layout of the struct is fixed.
-        st.attrs.push(parse_quote!(#[repr(C)]));
-
-        st.fields = self.fold_fields(st.fields);
-
-        st
-    }
-
-    fn fold_fields(&mut self, f: Fields) -> Fields {
-        match f {
-            Fields::Named(named) => Fields::Named(self.fold_fields_named(named)),
-            Fields::Unnamed(_) => panic!("Only structs with named fields are supported"),
-            Fields::Unit => panic!("Unit structs not supported, please append `{ }` to the struct definition"),
-        }
-    }
-
-    fn fold_fields_named(&mut self, f: FieldsNamed) -> FieldsNamed {
-        let vtable = &self.vtable;
-        let named = f.named;
-        parse_quote! {
-            {
-                __vtable: Box<#vtable>,
-                __refs: std::sync::atomic::AtomicU32,
-                #named
-            }
-        }
-    }
-}
-
-fn make_vtable_ident(ident: &syn::Ident) -> syn::Ident {
-    let name = format!("{}Vtbl", ident);
-
-    syn::Ident::new(&name, ident.span())
-}
-
-fn make_vtable_creator_ident(ident: &syn::Ident) -> syn::Ident {
-    let name = format!("__create_{}", ident);
-
-    syn::Ident::new(&name, ident.span())
-}
+use syn::{Ident, ItemStruct, ImplItem, Fields, FieldsNamed};
 
 #[proc_macro_attribute]
 pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
@@ -86,8 +25,15 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
         "First parent interface must always be IUnknown"
     );
 
-    let last = parents.last().unwrap();
-    let vtable = make_vtable_ident(&last);
+    let vtables: Vec<_> = parents.iter()
+        .map(|iface| VTable { parent: None, iface })
+        .collect();
+
+    let vtables: Vec<_> = vtables.iter().zip(vtables.iter().skip(1))
+        .map(|(parent, iface)| VTable { parent: Some(parent), iface: iface.iface })
+        .collect();
+
+    let last_vtable = vtables.last().unwrap();
 
     // Return the original input if it fails to parse.
     let input: syn::ItemStruct = match syn::parse(input.clone()) {
@@ -95,17 +41,17 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
         Err(_) => return input,
     };
 
-    let mut iunknown = IUnknownImpl { vtable: vtable.clone() };
+    let mut iunknown = IUnknownImpl { vtable: &last_vtable };
     let input = iunknown.fold_item_struct(input);
 
     let struct_name = input.ident.clone();
 
-    let vtable_creator: syn::ItemFn = {
-        // Identifier of the function which generate the final vtable.
-        let last_vtable_creator = make_vtable_creator_ident(&vtable);
+    let vtable_creator: ImplItem = {
+        let last_vtable_ident = last_vtable.ident();
+        let last_vtable_creator = last_vtable.creator_ident();
 
         parse_quote! {
-            fn create_vtable() -> Box<#vtable> {
+            fn create_vtable() -> Box<#last_vtable_ident> {
                 Box::new(Self::#last_vtable_creator())
             }
         }
@@ -167,71 +113,144 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
     expanded.into()
 }
 
-struct SystemAbi;
-impl Fold for SystemAbi {
-    fn fold_method_sig(&mut self, mut f: MethodSig) -> MethodSig {
-        f.abi = Some(parse_quote!(extern "system"));
-
-        f
-    }
-}
-
 #[proc_macro_attribute]
 pub fn implementation(attr: TokenStream, input: TokenStream) -> TokenStream {
     let Args { parents } =
-        syn::parse(attr).expect("Failed to parse parent interface and implemented interface");
+        syn::parse(attr).expect("Failed to parse attribute arguments");
 
-    let parent = &parents[0];
-    let iface = &parents[1];
+    assert_eq!(parents.len(), 2, "Expected two interfaces: the parent and the implemented interface");
+
+    let parent = VTable { parent: None, iface: &parents[0] };
+    let iface = VTable { parent: Some(&parent), iface: &parents[1] };
+
+    let mut imp = Implementation { iface, fns: Vec::new() };
 
     let input: syn::ItemImpl = syn::parse(input).expect("Could not parse interface impl block");
 
-    let input = SystemAbi.fold_item_impl(input);
+    let input = imp.fold_item_impl(input);
 
-    let struct_name: syn::Ident = {
-        let self_ty = input.self_ty.clone();
-        syn::parse(quote!(#self_ty).into())
-            .expect("The impl block should be for be the struct implementing the interface")
-    };
+    quote!(#input).into()
+}
 
-    let vtable_creator = {
-        let fns: Vec<_> = input.items.iter()
-            .filter_map(|it| match it {
-                syn::ImplItem::Method(method) => Some(&method.sig.ident),
-                _ => None,
-            }).collect();
+struct Args {
+    parents: Vec<Ident>,
+}
 
-        let method_names: Vec<_> = fns
-            .iter()
-            .map(|fn_ident| {
-                let ptr_name = fn_ident.to_string().to_camel_case();
+impl Synom for Args {
+    named!(parse -> Self, map!(
+        call!(Punctuated::<Ident, Token![,]>::parse_terminated_nonempty),
+        |parents| Args {
+            parents: parents.into_iter().collect(),
+        }
+    ));
+}
 
-                syn::Ident::new(&ptr_name, fn_ident.span())
-            }).collect();
+struct VTable<'a> {
+    parent: Option<&'a VTable<'a>>,
+    iface: &'a Ident,
+}
 
-        let vtable = make_vtable_ident(&iface);
-        let creator_name = make_vtable_creator_ident(&vtable);
-        let parent_vtable = make_vtable_ident(&parent);
-        let parent_creator = make_vtable_creator_ident(&parent_vtable);
+impl<'a> VTable<'a> {
+    fn ident(&self) -> Ident {
+        let vtable_name = format!("{}Vtbl", self.iface);
+        Ident::new(&vtable_name, self.iface.span())
+    }
 
-        quote! {
-            impl #struct_name {
-                fn #creator_name() -> #vtable {
-                    unsafe {
-                        #vtable {
-                            parent: Self::#parent_creator(),
-                            #(#method_names: std::mem::transmute((Self::#fns) as usize),)*
-                        }
+    fn creator_ident(&self) -> Ident {
+        let name = format!("__create_{}Vtbl", self.iface);
+        Ident::new(&name, self.iface.span())
+    }
+
+    fn creator(&self, fns: &Vec<Ident>) -> ImplItem {
+        let vtable = self.ident();
+        let ident = self.creator_ident();
+        let parent_creator = self.parent.map(|p| p.creator_ident());
+        let methods = fns.iter().map(|id| {
+                let method_name = id.to_string().to_camel_case();
+                syn::Ident::new(&method_name, id.span())
+            });
+
+        parse_quote! {
+            fn #ident() -> #vtable {
+                unsafe {
+                    #vtable {
+                        #(parent: Self::#parent_creator())*,
+                        #(#methods: std::mem::transmute((Self::#fns) as usize),)*
                     }
                 }
             }
         }
-    };
+    }
+}
 
-    let expanded = quote! {
-        #input
-        #vtable_creator
-    };
+struct IUnknownImpl<'a> {
+    // The identifier of the last-level VTable.
+    vtable: &'a VTable<'a>,
+}
 
-    expanded.into()
+impl<'a> Fold for IUnknownImpl<'a> {
+    fn fold_item_struct(&mut self, mut st: ItemStruct) -> ItemStruct {
+        // Ensure the layout of the struct is fixed.
+        st.attrs.push(parse_quote!(#[repr(C)]));
+
+        st.fields = self.fold_fields(st.fields);
+
+        st
+    }
+
+    fn fold_fields(&mut self, f: Fields) -> Fields {
+        match f {
+            Fields::Named(named) => Fields::Named(self.fold_fields_named(named)),
+            Fields::Unnamed(_) => panic!("Only structs with named fields are supported"),
+            Fields::Unit => panic!("Unit structs not supported, please append `{ }` to the struct definition"),
+        }
+    }
+
+    fn fold_fields_named(&mut self, f: FieldsNamed) -> FieldsNamed {
+        let vtable = self.vtable.ident();
+        let named = f.named;
+        parse_quote! {
+            {
+                __vtable: Box<#vtable>,
+                __refs: std::sync::atomic::AtomicU32,
+                #named
+            }
+        }
+    }
+}
+
+use syn::{ItemImpl, MethodSig};
+
+struct Implementation<'a> {
+    // The interface we are implementing.
+    iface: VTable<'a>,
+    // The identifiers of the interface methods.
+    fns: Vec<Ident>,
+}
+
+impl<'a> Fold for Implementation<'a> {
+    fn fold_item_impl(&mut self, mut i: ItemImpl) -> ItemImpl {
+        let items = &mut i.items;
+
+        // Parse all the items and extract the function identifiers.
+        *items = items.drain(..)
+            .map(|it| self.fold_impl_item(it))
+            .collect();
+
+        // Generate the VTable creator for this interface.
+        let creator = self.iface.creator(&self.fns);
+        items.push(creator);
+
+        i
+    }
+
+    fn fold_method_sig(&mut self, mut f: MethodSig) -> MethodSig {
+        // Ensure the functions have the right ABI.
+        f.abi = Some(parse_quote!(extern "system"));
+
+        // Store the identifier for later.
+        self.fns.push(f.ident.clone());
+
+        f
+    }
 }
