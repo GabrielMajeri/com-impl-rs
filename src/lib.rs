@@ -171,7 +171,7 @@ impl<'a> VTable<'a> {
             });
 
         parse_quote! {
-            fn #ident() -> #vtable {
+            pub fn #ident() -> #vtable {
                 unsafe {
                     #vtable {
                         #(parent: Self::#parent_creator())*,
