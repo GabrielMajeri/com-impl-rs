@@ -108,6 +108,14 @@ pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
 
             #vtable_creator
         }
+
+        impl std::ops::Deref for #struct_name {
+            type Target = IUnknown;
+            fn deref(&self) -> &IUnknown {
+                let ptr = self as *const _ as *const IUnknown;
+                unsafe { &*ptr }
+            }
+        }
     };
 
     expanded.into()
