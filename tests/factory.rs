@@ -4,12 +4,12 @@
 #![feature(integer_atomics)]
 
 // Interface imports.
-use winapi::shared::dxgi::{IDXGIFactory, IDXGIFactoryVtbl, IDXGIObject, IDXGIObjectVtbl};
-use winapi::um::unknwnbase::{IUnknown, IUnknownVtbl};
+use winapi::shared::dxgi::{IDXGIFactory, IDXGIFactoryVtbl, IDXGIObjectVtbl};
+use winapi::um::unknwnbase::IUnknownVtbl;
 
-use com_impl::{implementation, interface};
+use com_impl::{ComInterface, implementation, interface};
 
-#[interface(IUnknown, IDXGIObject, IDXGIFactory)]
+#[interface(IDXGIFactory)]
 pub struct FakeFactory {
     variable: u64,
 }
@@ -17,7 +17,7 @@ pub struct FakeFactory {
 impl FakeFactory {
     pub fn new() -> *mut IDXGIFactory {
         let fact = Self {
-            __vtable: Self::create_vtable(),
+            __vtable: Box::new(Self::create_vtable()),
             __refs: Self::create_refs(),
             variable: 12345,
         };

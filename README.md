@@ -41,17 +41,17 @@ use winapi::um::unknwnbase::{IUnknown, IUnknownVtbl};
 use some::other::{Interface, InterfaceVtbl};
 ```
 
-Then you can import the procedural macros exported by this crate.
+Then you need to import the procedural macros and the `ComInterface` trait exported by this crate.
 
 ```rust
-use com_impl::{interface, implementation};
+use com_impl::{ComInterface, interface, implementation};
 ```
 
 Define your structure.
-You must specify, in the correct order, all of the interfaces in the inheritance chain.
+You must specifiy the final interface you want to implement.
 
 ```rust
-#[interface(IUnknown, IDXGIObject, IDXGIFactory)]
+#[interface(IDXGIFactory)]
 struct MyInterface {}
 ```
 
@@ -93,7 +93,7 @@ impl MyInterface {
     // This is an example constructor.
     fn new() -> Self {
         Self {
-            __vtable: Self::create_vtable(),
+            __vtable: Box::new(Self::create_vtable()),
             __refs: Self::create_refs(),
             /* other fields */
         }
