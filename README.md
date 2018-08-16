@@ -23,14 +23,6 @@ version = "0.3"
 features = ["winerror", "unknwnbase"]
 ```
 
-You also have to enable the `integer_atomics` feature.
-
-```rust
-#![feature(integer_atomics)]
-```
-
-This is required by the `IUnknown` reference counting implementation.
-
 ### For every interface you want to implement
 
 You must manually import the interfaces you are implementing and their vtables.
@@ -58,17 +50,23 @@ struct MyInterface {}
 For each interface in the inheritance chain, you must have a new `implementation`.
 
 ```rust
-// IUnknown's methods & reference counting are implemented automatically.
-
-// First parameter is the base class, in this case `IUnknown`.
-// Second parameter is the class you are implementing, in this case `IDXGIObject`.
-#[implementation(IUnknown, IDXGIObject)]
+// The custom attribute's parameter is the interface you are implementing.
+// In this case `IUnknown`.
+#[implementation(IUnknown)]
 impl MyInterface {
     // COM functions follow the PascalCase calling convention.
     // You implement a PascalCase function by using the snake_case name.
 
-    // For example, this one implements `GetParent`.
+    // For example, this one implements `QueryInterface`.
     // Note: the macro automatically adds `unsafe extern "system"` to the function definition.
+    fn query_interface(&self) -> HRESULT { /* ... */ }
+    fn add_ref(&mut self) -> ULONG { /* ... */ }
+    fn release(&mut self) -> ULONG { /* ... */ }
+}
+
+// Now we implement IDXGIObject.
+#[implementation(IDXGIObject)]
+impl MyInterface {
     fn get_parent(&mut self, riid: REFIID, parent: *mut c_void) -> HRESULT { /* ... */ }
 
     // ... Implement the other methods here ...
@@ -78,15 +76,15 @@ impl MyInterface {
 If we had specified `NextInterface` instead of `IDXGIObject` when defining the struct, we could continue the implementation chain here.
 
 ```rust
-/// `IDXGIObject` implemented above is the parent, `NextInterface` is implemented here.
-#[implementation(IDXGIObject, NextInterface)]
+/// `NextInterface` is implemented here.
+#[implementation(NextInterface)]
 impl MyInterface {
     // ... New functions added by NextInterface ...
 }
 ```
 
-To implement the constructor for your type, use the generated `Self::create_vtable` and `Self::create_refs` functions
-to fill in the generated `__vtable` and `__refs` fields.
+To implement the constructor for your type, use the generated `Self::create_vtable` function
+to fill in the generated `__vtable` field.
 
 ```rust
 impl MyInterface {
@@ -94,7 +92,6 @@ impl MyInterface {
     fn new() -> Self {
         Self {
             __vtable: Box::new(Self::create_vtable()),
-            __refs: Self::create_refs(),
             /* other fields */
         }
     }
