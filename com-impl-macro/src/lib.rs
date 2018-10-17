@@ -1,5 +1,7 @@
 #![recursion_limit = "128"]
 
+extern crate proc_macro;
+
 #[macro_use]
 extern crate quote;
 
@@ -8,7 +10,7 @@ extern crate syn;
 
 use heck::CamelCase;
 
-use proc_macro::TokenStream;
+use self::proc_macro::TokenStream;
 
 use syn::fold::Fold;
 use syn::{Ident, ItemStruct, Fields, FieldsNamed};
