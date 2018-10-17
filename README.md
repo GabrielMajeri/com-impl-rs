@@ -3,6 +3,9 @@
 This crate provides a procedural macro which helps with implementing
 [COM interfaces](https://en.wikipedia.org/wiki/Component_Object_Model) in Rust.
 
+It is currently able to implement interfaces with single-inheritance
+COM hierarchies, and handles constructing the vtable automatically.
+
 **Note**: if you only want to use COM in Rust,
 you can simply use [winapi](https://github.com/retep998/winapi-rs).
 This crate is for implementing an interface's methods from within Rust.
@@ -25,13 +28,17 @@ features = ["winerror", "unknwnbase"]
 
 ### For every interface you want to implement
 
-You must manually import the interfaces you are implementing and their vtables.
+You must manually import the **interfaces** you are implementing and **their vtables**.
 
 ```rust
 use winapi::shared::dxgi::{IDXGIObject, IDXGIObjectVtbl};
 use winapi::um::unknwnbase::{IUnknown, IUnknownVtbl};
 use some::other::{Interface, InterfaceVtbl};
 ```
+
+It is **very important** for the vtable to be correctly defined, otherwise external code
+using your interface could misbehave. Use the `RIDL!` macro from `winapi` for maximum
+compatibility.
 
 Then you need to import the procedural macros and the `ComInterface` trait exported by this crate.
 
@@ -99,6 +106,28 @@ impl MyInterface {
 ```
 
 Check out the `tests` directory for more examples.
+
+## FAQ
+
+- Q: Does it auto-implement `IUnknown`'s methods?
+
+  A: No. See the test directory for an example on how to do this manually.
+  Also see the [various blog posts](https://blogs.msdn.microsoft.com/oldnewthing/20040326-00/?p=40033)
+  giving practical advice on implementing COM stuff.
+
+- Q: Is it safe?
+
+  A: Not very safe. Rust proc macros are limited in their access to the type system.
+  We don't exactly have a full reflection system, so you **must** make sure your method
+  implementation match the method signatures.
+
+- Q: How to handle memory management?
+
+  A: You have to implement an internal atomic reference counter yourself,
+  and then remember to allocate any COM objects on the heap, to be able to
+  easily share references to them.
+
+  See the test code for an idea on how to use `Box`.
 
 ## Issues
 
