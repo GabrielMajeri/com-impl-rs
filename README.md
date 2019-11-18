@@ -1,5 +1,7 @@
 # Implement COM interfaces in Rust
 
+**DEPRECATED**: this crate has been superseded by [com-rs](https://github.com/microsoft/com-rs), which is supported by Microsoft.
+
 This crate provides a procedural macro which helps with implementing
 [COM interfaces](https://en.wikipedia.org/wiki/Component_Object_Model) in Rust.
 
